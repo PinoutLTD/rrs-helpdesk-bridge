@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly filing of Robonomics reports as helpdesk tickets
+
+[Timer]
+# Ten minutes past the hour: the connector runs on the hour, so the reports of
+# that pass are complete by the time this one reads them.
+OnCalendar=*:10
+RandomizedDelaySec=2m
+Persistent=true
+Unit=rrs-helpdesk-bridge.service
+
+[Install]
+WantedBy=timers.target

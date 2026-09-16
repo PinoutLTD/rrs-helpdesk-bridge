@@ -238,3 +238,18 @@ def test_retry_after_a_failed_note_does_not_inflate_the_counter(
     assert first.failed == 1
     assert second.appended == 1
     assert odoo.tickets[ticket_id_of(odoo)]["count"] == 2
+
+
+def test_deleted_files_do_not_stop_the_ticket(
+    settings, registry, odoo, store, reports_dir
+) -> None:
+    # The connector removed the decrypted files by age before this run.
+    directory = make_report(reports_dir, 94, 1789114351000, LOG_ISSUE)
+    (directory / "decrypted" / "home-assistant.log").unlink()
+
+    result = run_once(settings, registry, odoo, store, dry_run=False)
+
+    assert result.created == 1
+    assert [name for _, name, _ in odoo.attachments] == [
+        "datalog_94_1789114351000-issue_description.json"
+    ]

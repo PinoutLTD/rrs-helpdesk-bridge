@@ -73,9 +73,14 @@ def attachment_payloads(
     skipped: list[str] = []
     for file in report.manifest.files:
         if file.size_bytes > settings.max_attachment_bytes:
-            skipped.append(file.name)
+            skipped.append(f"{file.name} (too large)")
             continue
         path = resolve_inside(report.directory, file.path)
+        # The connector deletes artifacts by age, so a listed file may be gone
+        # by the time an old report is filed. The ticket is still worth having.
+        if not path.exists():
+            skipped.append(f"{file.name} (already deleted)")
+            continue
         payloads.append((f"{report.directory.name}-{file.name}", path.read_bytes()))
     return payloads, skipped
 
@@ -90,7 +95,7 @@ def attach_files(
         odoo.attach_file(ticket_id, name, data)
     if skipped:
         LOGGER.warning(
-            "Report %s: files over the attachment limit were left on disk: %s",
+            "Report %s: not attached: %s",
             report.manifest.report_id,
             ", ".join(skipped),
         )
