@@ -1,0 +1,10 @@
+# client_id is the site slug used by rrs-connector and the field engineer's
+# repository; odoo_partner_id is the res.partner the ticket is attached to.
+clients:
+  - client_id: "qube-block-a-301"
+    odoo_partner_id: 7
+    description: "Test Client A"
+
+  - client_id: "del-mar-24f"
+    odoo_partner_id: 8
+    description: "Test Client B"
