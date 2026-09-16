@@ -149,10 +149,16 @@ def log_events_html(details: dict) -> str:
             f"<td>{escape(truncate(event.get('message', ''), MAX_MESSAGE_LENGTH))}</td>"
             "</tr>"
         )
+    hidden = len(events) - MAX_TOP_EVENTS
+    more = (
+        f"<p>… and {hidden} more event(s), see the attached log.</p>"
+        if hidden > 0
+        else ""
+    )
     return (
         "<p><b>Top log events</b></p>"
         "<table border='1' cellpadding='4' cellspacing='0'>"
-        f"{header}{''.join(rows)}</table>"
+        f"{header}{''.join(rows)}</table>{more}"
     )
 
 
@@ -172,6 +178,12 @@ def entities_html(details: dict) -> str:
     for entity in pure[:MAX_DEVICES]:
         parts.append(f"<li>{escape(entity)}</li>")
     parts.append("</ul>")
+    hidden = max(len(devices) - MAX_DEVICES, 0) + max(len(pure) - MAX_DEVICES, 0)
+    if hidden:
+        parts.append(
+            f"<p>… and {hidden} more unavailable device(s) or entity(ies), "
+            "see the attached report.</p>"
+        )
     return "".join(parts)
 
 

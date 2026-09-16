@@ -108,10 +108,13 @@ def append_to_ticket(
     settings: EnvSettings,
 ) -> None:
     count = ticket.count + 1
+    # The note goes first: if anything below fails, the retry starts from the
+    # same ticket counter and cannot inflate it. A repeated note is visible,
+    # a wrong number is not.
+    odoo.post_note(ticket.id, build_repeat_note(report, count))
     odoo.update_ticket(
         ticket.id, {"count": count, "last_occurred": last_occurred(report)}
     )
-    odoo.post_note(ticket.id, build_repeat_note(report, count))
     attach_files(odoo, ticket.id, report, settings)
 
 

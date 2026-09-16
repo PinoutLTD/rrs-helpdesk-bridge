@@ -21,7 +21,11 @@ def connect(settings: EnvSettings, write_enabled: bool) -> OdooClient:
         vault,
         item,
     )
-    return OdooClient(load_odoo_credentials(vault, item), write_enabled)
+    return OdooClient(
+        load_odoo_credentials(vault, item),
+        write_enabled,
+        note_email_from=settings.note_email_from,
+    )
 
 
 def odoo_check(settings: EnvSettings, registry: ClientRegistry) -> int:

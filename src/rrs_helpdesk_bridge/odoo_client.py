@@ -46,7 +46,13 @@ class TicketSummary:
 
 
 class OdooClient:
-    def __init__(self, credentials: OdooCredentials, write_enabled: bool) -> None:
+    def __init__(
+        self,
+        credentials: OdooCredentials,
+        write_enabled: bool,
+        note_email_from: str = "",
+    ) -> None:
+        self.note_email_from = note_email_from
         self.url = credentials.url
         self.db = credentials.db
         self.username = credentials.username
@@ -153,13 +159,18 @@ class OdooClient:
         self._write(TICKET_MODEL, "write", [ticket_id], values)
 
     def post_note(self, ticket_id: int, body: str) -> None:
-        self._write(
-            TICKET_MODEL,
-            "message_post",
-            [ticket_id],
-            body=body,
-            subtype_xmlid=NOTE_SUBTYPE,
-        )
+        arguments = {"body": body, "subtype_xmlid": NOTE_SUBTYPE}
+        if self.note_email_from:
+            arguments["email_from"] = self.note_email_from
+        try:
+            self._write(TICKET_MODEL, "message_post", [ticket_id], **arguments)
+        except OdooError as e:
+            if not self.note_email_from and "email address" in str(e):
+                raise OdooError(
+                    f"{e}. The Odoo user behind the API key has no e-mail "
+                    "address: give it one, or set RRSB_NOTE_EMAIL_FROM"
+                ) from e
+            raise
 
     def attach_file(self, ticket_id: int, name: str, data: bytes) -> int:
         """Attach a file to the ticket without posting a message about it."""

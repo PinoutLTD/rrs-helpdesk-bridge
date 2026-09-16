@@ -148,3 +148,24 @@ def test_values_never_carry_address_fields(reports_dir) -> None:
         "last_occurred",
         "partner_id",
     }
+
+
+def test_truncated_lists_say_how_much_is_hidden(reports_dir) -> None:
+    devices = {
+        f"dev{number}": {
+            "device_name": f"Device {number}",
+            "entities": [f"sensor.s{number}"],
+        }
+        for number in range(40)
+    }
+    issue = dict(ENTITIES_ISSUE)
+    issue["details"] = {
+        "unavailable_entities": {"devices": devices, "pure_entities": []}
+    }
+    report = report_for(reports_dir, issue)
+
+    description = ticket_description(report)
+
+    assert "Device 29" in description
+    assert "Device 30" not in description
+    assert "and 10 more unavailable" in description

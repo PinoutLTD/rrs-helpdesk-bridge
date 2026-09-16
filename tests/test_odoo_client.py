@@ -3,6 +3,7 @@ import pytest
 from rrs_helpdesk_bridge.odoo_client import (
     QUIET_CONTEXT,
     OdooClient,
+    OdooError,
     WriteDisabledError,
 )
 
@@ -12,6 +13,7 @@ class RecordingClient(OdooClient):
 
     def __init__(self, write_enabled: bool) -> None:
         self.write_enabled = write_enabled
+        self.note_email_from = ""
         self.calls: list[tuple] = []
         self.result = [1]
 
@@ -77,3 +79,25 @@ def test_attachment_is_base64_encoded() -> None:
     assert values["datas"] == "aGVsbG8="
     assert values["res_model"] == "helpdesk.ticket"
     assert values["res_id"] == 5
+
+
+def test_note_sender_is_added_when_configured() -> None:
+    client = RecordingClient(write_enabled=True)
+    client.note_email_from = "bridge@example.com"
+
+    client.post_note(5, "<p>again</p>")
+
+    _, _, _, kwargs = client.calls[0]
+    assert kwargs["email_from"] == "bridge@example.com"
+
+
+def test_missing_sender_address_is_explained() -> None:
+    class FailingClient(RecordingClient):
+        def _call(self, model, method, *args, **kwargs):
+            raise OdooError("Unable to send message, configure the email address")
+
+    client = FailingClient(write_enabled=True)
+    client.note_email_from = ""
+
+    with pytest.raises(OdooError, match="RRSB_NOTE_EMAIL_FROM"):
+        client.post_note(5, "<p>again</p>")

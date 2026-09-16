@@ -216,3 +216,25 @@ def test_missing_reports_directory_is_an_error(
         assert "does not exist" in str(e)
     else:
         raise AssertionError("a missing reports directory must be reported")
+
+
+def test_retry_after_a_failed_note_does_not_inflate_the_counter(
+    settings, registry, odoo, store, reports_dir
+) -> None:
+    make_report(reports_dir, 94, 1789114351000, LOG_ISSUE)
+    run_once(settings, registry, odoo, store, dry_run=False)
+    make_report(reports_dir, 95, 1789117951000, LOG_ISSUE)
+    broken = odoo.post_note
+
+    def failing_note(ticket_id: int, body: str) -> None:
+        raise RuntimeError("Odoo refused the note")
+
+    odoo.post_note = failing_note
+    first = run_once(settings, registry, odoo, store, dry_run=False)
+    odoo.post_note = broken
+
+    second = run_once(settings, registry, odoo, store, dry_run=False)
+
+    assert first.failed == 1
+    assert second.appended == 1
+    assert odoo.tickets[ticket_id_of(odoo)]["count"] == 2

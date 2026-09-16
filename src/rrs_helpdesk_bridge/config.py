@@ -44,6 +44,9 @@ class EnvSettings(BaseSettings):
     stage_id: PositiveInt = 1
     channel_id: PositiveInt = 4
     company_id: PositiveInt = 1
+    # Odoo refuses message_post when the API user has no e-mail address: set
+    # one on that user, or put a sender address here.
+    note_email_from: str = ""
     attach_files: bool = True
     # Odoo stores attachments base64-encoded in the database.
     max_attachment_bytes: PositiveInt = 5 * 1024 * 1024
