@@ -101,3 +101,25 @@ def test_missing_sender_address_is_explained() -> None:
 
     with pytest.raises(OdooError, match="RRSB_NOTE_EMAIL_FROM"):
         client.post_note(5, "<p>again</p>")
+
+
+def test_only_staff_accounts_can_be_notified() -> None:
+    client = RecordingClient(write_enabled=True)
+    client.result = []
+
+    client.find_internal_partners(["Colleague@Example.com"])
+
+    _, method, args, _ = client.calls[0]
+    assert method == "search_read"
+    assert ("share", "=", False) in args[0]
+    assert ("email", "in", ["colleague@example.com"]) in args[0]
+
+
+def test_creation_message_uses_the_helpdesk_subtype() -> None:
+    client = RecordingClient(write_enabled=True)
+
+    client.announce_ticket(5, "<p>new</p>")
+
+    _, method, _, kwargs = client.calls[0]
+    assert method == "message_post"
+    assert kwargs["subtype_xmlid"] == "helpdesk_mgmt.hlp_tck_created"

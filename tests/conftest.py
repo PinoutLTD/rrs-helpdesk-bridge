@@ -121,6 +121,11 @@ class FakeOdoo:
 
     def __init__(self, write_enabled: bool = True) -> None:
         self.write_enabled = write_enabled
+        # Only staff accounts exist here, as in Odoo with share = False.
+        self.internal_users = {"engineer@pinout.example": 11}
+        self.created_subtype_id: int | None = 4
+        self.subscriptions: list[tuple[int, list[int], list[int]]] = []
+        self.announcements: list[tuple[int, str]] = []
         self.tickets: dict[int, dict] = {}
         self.open_by_signature: dict[str, int] = {}
         self.notes: list[tuple[int, str]] = []
@@ -131,6 +136,27 @@ class FakeOdoo:
     def _guard(self, method: str) -> None:
         if not self.write_enabled:
             raise WriteDisabledError(f"{method} blocked: this run is a dry run")
+
+    def find_internal_partners(self, emails: list[str]) -> dict[str, int]:
+        wanted = [email.strip().lower() for email in emails]
+        return {
+            email: partner
+            for email, partner in self.internal_users.items()
+            if email in wanted
+        }
+
+    def find_created_subtype_id(self) -> int | None:
+        return self.created_subtype_id
+
+    def subscribe(
+        self, ticket_id: int, partner_ids: list[int], subtype_ids: list[int]
+    ) -> None:
+        self._guard("message_subscribe")
+        self.subscriptions.append((ticket_id, partner_ids, subtype_ids))
+
+    def announce_ticket(self, ticket_id: int, body: str) -> None:
+        self._guard("message_post")
+        self.announcements.append((ticket_id, body))
 
     def find_open_ticket(self, signature: str) -> TicketSummary | None:
         ticket_id = self.open_by_signature.get(signature)

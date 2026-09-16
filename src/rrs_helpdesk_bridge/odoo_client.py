@@ -19,6 +19,10 @@ LOGGER = logging.getLogger(__name__)
 TICKET_MODEL = "helpdesk.ticket"
 ATTACHMENT_MODEL = "ir.attachment"
 NOTE_SUBTYPE = "mail.mt_note"
+# The subtype helpdesk_mgmt posts on ticket creation. Followers are subscribed
+# to this one only, so repeat notes stay silent.
+CREATED_SUBTYPE = "helpdesk_mgmt.hlp_tck_created"
+CREATED_SUBTYPE_NAME = "created"
 
 # Suppress tracking messages, automatic followers, and creation logs.
 QUIET_CONTEXT = {
@@ -125,6 +129,49 @@ class OdooClient:
         )
         return records[0] if records else None
 
+    def find_internal_partners(self, emails: list[str]) -> dict[str, int]:
+        """Map each address to the partner of an internal Odoo user.
+
+        Portal and public users are excluded by `share = False`, so only
+        colleagues with a staff account can ever be notified.
+        """
+
+        if not emails:
+            return {}
+        wanted = [email.strip().lower() for email in emails if email.strip()]
+        users = self._call(
+            "res.users",
+            "search_read",
+            [
+                "&",
+                ("share", "=", False),
+                "|",
+                ("login", "in", wanted),
+                ("email", "in", wanted),
+            ],
+            fields=["login", "email", "partner_id"],
+        )
+        found: dict[str, int] = {}
+        for user in users:
+            for value in (user.get("email"), user.get("login")):
+                if isinstance(value, str) and value.lower() in wanted:
+                    found[value.lower()] = user["partner_id"][0]
+        return found
+
+    def find_created_subtype_id(self) -> int | None:
+        """The "Ticket Created" subtype, looked up by model and name."""
+
+        subtypes = self._call(
+            "mail.message.subtype",
+            "search_read",
+            [("res_model", "=", TICKET_MODEL)],
+            fields=["id", "name"],
+        )
+        for subtype in subtypes:
+            if CREATED_SUBTYPE_NAME in str(subtype.get("name", "")).lower():
+                return subtype["id"]
+        return None
+
     def find_open_ticket(self, signature: str) -> TicketSummary | None:
         """The open ticket carrying this problem signature, if there is one.
 
@@ -171,6 +218,25 @@ class OdooClient:
                     "address: give it one, or set RRSB_NOTE_EMAIL_FROM"
                 ) from e
             raise
+
+    def subscribe(
+        self, ticket_id: int, partner_ids: list[int], subtype_ids: list[int]
+    ) -> None:
+        self._write(
+            TICKET_MODEL,
+            "message_subscribe",
+            [ticket_id],
+            partner_ids=partner_ids,
+            subtype_ids=subtype_ids,
+        )
+
+    def announce_ticket(self, ticket_id: int, body: str) -> None:
+        """Post the creation message that notifies the subscribed colleagues."""
+
+        arguments = {"body": body, "subtype_xmlid": CREATED_SUBTYPE}
+        if self.note_email_from:
+            arguments["email_from"] = self.note_email_from
+        self._write(TICKET_MODEL, "message_post", [ticket_id], **arguments)
 
     def attach_file(self, ticket_id: int, name: str, data: bytes) -> int:
         """Attach a file to the ticket without posting a message about it."""

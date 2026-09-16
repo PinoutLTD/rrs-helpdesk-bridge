@@ -251,6 +251,18 @@ def build_ticket_values(
     return values
 
 
+def build_new_ticket_notice(report: Report) -> str:
+    """The creation message colleagues receive by e-mail; details are in the
+    ticket itself, so this stays short."""
+
+    issue = report.issue or ReportIssue()
+    headline = escape(issue.summary or issue_label(issue.type))
+    return (
+        f"<p><b>{escape(report.manifest.client_id)}</b>: {headline}</p>"
+        f"{report_facts(report)}"
+    )
+
+
 def build_repeat_note(report: Report, count: int) -> str:
     """An internal note added when the same problem is reported again."""
 

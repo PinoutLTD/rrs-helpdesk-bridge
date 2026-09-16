@@ -21,6 +21,7 @@ from rrs_helpdesk_bridge.manifests import (
 from rrs_helpdesk_bridge.odoo_client import OdooClient, TicketSummary
 from rrs_helpdesk_bridge.state import Action, StateStore
 from rrs_helpdesk_bridge.ticket_builder import (
+    build_new_ticket_notice,
     build_repeat_note,
     build_ticket_values,
     last_occurred,
@@ -34,6 +35,18 @@ NO_PARTNER_DETAIL = "client_id is not in the registry, ticket has no partner"
 
 
 @dataclass
+class Recipients:
+    """Colleagues notified about new tickets, resolved once per run."""
+
+    partner_ids: list[int] = field(default_factory=list)
+    subtype_id: int | None = None
+
+    @property
+    def usable(self) -> bool:
+        return bool(self.partner_ids) and self.subtype_id is not None
+
+
+@dataclass
 class RunResult:
     seen: int = 0
     handled: int = 0
@@ -42,6 +55,7 @@ class RunResult:
     skipped: int = 0
     failed: int = 0
     unreadable: int = 0
+    notified: int = 0
     dry_run: bool = True
     planned: list[str] = field(default_factory=list)
 
@@ -80,6 +94,53 @@ def attach_files(
             report.manifest.report_id,
             ", ".join(skipped),
         )
+
+
+def resolve_recipients(odoo: OdooClient, registry: ClientRegistry) -> Recipients:
+    """Who gets an e-mail about a new ticket, and through which subtype."""
+
+    if not registry.notify_emails:
+        return Recipients()
+
+    found = odoo.find_internal_partners(registry.notify_emails)
+    missing = [
+        email for email in registry.notify_emails if email.strip().lower() not in found
+    ]
+    if missing:
+        LOGGER.warning(
+            "No internal Odoo user for %s: nobody will be notified at that "
+            "address (only staff accounts can be subscribed)",
+            ", ".join(missing),
+        )
+    if not found:
+        return Recipients()
+
+    subtype_id = odoo.find_created_subtype_id()
+    if subtype_id is None:
+        LOGGER.error(
+            "The 'Ticket Created' subtype was not found: skipping "
+            "notifications rather than subscribing to everything"
+        )
+        return Recipients()
+
+    LOGGER.info("New tickets will notify: %s", ", ".join(sorted(found)))
+    return Recipients(partner_ids=sorted(found.values()), subtype_id=subtype_id)
+
+
+def notify_new_ticket(
+    odoo: OdooClient, ticket_id: int, report: Report, recipients: Recipients
+) -> bool:
+    """Subscribe the colleagues and post the message that reaches their inbox.
+
+    They are subscribed to the creation subtype only, so later notes on the
+    same ticket stay silent.
+    """
+
+    if not recipients.usable:
+        return False
+    odoo.subscribe(ticket_id, recipients.partner_ids, [recipients.subtype_id])
+    odoo.announce_ticket(ticket_id, build_new_ticket_notice(report))
+    return True
 
 
 def open_ticket(
@@ -124,6 +185,7 @@ def dispatch_report(
     store: StateStore,
     registry: ClientRegistry,
     settings: EnvSettings,
+    recipients: Recipients,
     dry_run: bool,
     result: RunResult,
 ) -> None:
@@ -161,6 +223,8 @@ def dispatch_report(
 
     if existing is None:
         ticket_id, detail = open_ticket(odoo, report, registry, settings)
+        if notify_new_ticket(odoo, ticket_id, report, recipients):
+            result.notified += 1
         store.record(
             manifest.report_id,
             manifest.client_id,
@@ -224,10 +288,13 @@ def run_once(
 ) -> RunResult:
     result = RunResult(dry_run=dry_run)
     reports = load_pending_reports(settings.reports_dir, store, result)
+    recipients = resolve_recipients(odoo, registry) if reports else Recipients()
 
     for report in reports:
         try:
-            dispatch_report(report, odoo, store, registry, settings, dry_run, result)
+            dispatch_report(
+                report, odoo, store, registry, settings, recipients, dry_run, result
+            )
         except Exception as e:
             LOGGER.exception("Failed to file report %s", report.manifest.report_id)
             result.failed += 1
@@ -242,13 +309,14 @@ def run_once(
 
     LOGGER.info(
         "Run finished%s: manifests=%d already handled=%d unreadable=%d; "
-        "tickets created=%d appended=%d; skipped=%d failed=%d",
+        "tickets created=%d appended=%d notified=%d; skipped=%d failed=%d",
         " (dry run, nothing was written)" if dry_run else "",
         result.seen,
         result.handled,
         result.unreadable,
         result.created,
         result.appended,
+        result.notified,
         result.skipped,
         result.failed,
     )

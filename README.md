@@ -47,6 +47,20 @@ read-only mount.
 
 ## Decisions
 
+### Colleagues are notified, clients are not
+
+A new ticket is an early warning for the team, so the people in
+`notify_emails` (in the registry file) receive an e-mail when one is opened:
+
+- an address is only ever subscribed if it belongs to an **internal** Odoo user
+  (`share = False`), so a client address in that list resolves to nobody
+  instead of turning into a message to the client;
+- they are subscribed to the "Ticket Created" subtype **only**, so the repeat
+  notes on the same ticket stay silent — one e-mail per new problem, not per
+  report;
+- if that subtype cannot be found, nobody is subscribed at all rather than
+  being subscribed to everything.
+
 ### Nothing reaches the client by e-mail
 
 The production helpdesk has a live SMTP server, and stages 4–6 carry a customer
@@ -55,7 +69,8 @@ message to the client, so:
 
 - tickets are always created in the opening stage (`RRSB_STAGE_ID`, "New"), and
   this service never sets a closing stage;
-- `partner_email` and `email_cc` are never written;
+- `partner_email` and `email_cc` are never written, and the client partner is
+  never made a follower;
 - every mutating call carries `tracking_disable`, `mail_create_nosubscribe`,
   `mail_create_nolog`, and `mail_notrack`;
 - repeat occurrences are added as internal notes (`mail.mt_note`).
@@ -120,8 +135,8 @@ usually in a local `.env` (see `.env.example`):
 | `RRSB_ATTACH_FILES` | attach decrypted files to tickets (default `true`) |
 | `RRSB_MAX_ATTACHMENT_BYTES` | per-file attachment limit (default 5 MiB) |
 
-The registry maps a site to a partner; its format is in
-`config/registry.example.yaml`. `client_id` is the site slug shared with the
+The registry maps a site to a partner and lists the colleagues to notify; its
+format is in `config/registry.example.yaml`. `client_id` is the site slug shared with the
 connector and the field engineer's repository (`qube-block-a-301`), so a report,
 its ticket, and the site card are found by one key.
 

@@ -74,6 +74,10 @@ class ClientConfig(BaseModel):
 
 class ClientRegistry(BaseModel):
     clients: list[ClientConfig]
+    # Colleagues who should get an e-mail when a new ticket is opened. Only
+    # internal Odoo users are ever subscribed (see odoo_client), so a client
+    # address here cannot turn into a message to the client.
+    notify_emails: list[str] = []
 
     def partner_id(self, client_id: str) -> int | None:
         for client in self.clients:

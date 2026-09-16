@@ -8,3 +8,10 @@ clients:
   - client_id: "del-mar-24f"
     odoo_partner_id: 8
     description: "Test Client B"
+
+# Who gets an e-mail when a new ticket is opened. Only addresses that belong to
+# an internal Odoo user are subscribed, and only to the "Ticket Created"
+# subtype, so repeat notes on an open ticket stay silent.
+notify_emails:
+  - "you@pinout.cloud"
+  - "colleague@pinout.cloud"
