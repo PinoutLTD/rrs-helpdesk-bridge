@@ -18,11 +18,16 @@ LOGGER = logging.getLogger(__name__)
 
 TICKET_MODEL = "helpdesk.ticket"
 ATTACHMENT_MODEL = "ir.attachment"
-NOTE_SUBTYPE = "mail.mt_note"
+# Messages are posted through the composer wizard, not message_post: over
+# XML-RPC a body can only be a plain string, and message_post escapes those,
+# so the HTML arrived in the ticket and in the e-mail as visible markup. The
+# composer's body is an Html field and is stored as written.
+COMPOSER_MODEL = "mail.compose.message"
+SUBTYPE_MODEL = "mail.message.subtype"
 # The subtype helpdesk_mgmt posts on ticket creation. Followers are subscribed
 # to this one only, so repeat notes stay silent.
-CREATED_SUBTYPE = "helpdesk_mgmt.hlp_tck_created"
 CREATED_SUBTYPE_NAME = "created"
+NOTE_SUBTYPE_NAME = "note"
 
 # Suppress tracking messages, automatic followers, and creation logs.
 QUIET_CONTEXT = {
@@ -57,6 +62,8 @@ class OdooClient:
         note_email_from: str = "",
     ) -> None:
         self.note_email_from = note_email_from
+        self._created_subtype_id: int | None = None
+        self._note_subtype_id: int | None = None
         self.url = credentials.url
         self.db = credentials.db
         self.username = credentials.username
@@ -161,14 +168,28 @@ class OdooClient:
     def find_created_subtype_id(self) -> int | None:
         """The "Ticket Created" subtype, looked up by model and name."""
 
+        if self._created_subtype_id is None:
+            self._created_subtype_id = self._find_subtype_id(
+                TICKET_MODEL, CREATED_SUBTYPE_NAME
+            )
+        return self._created_subtype_id
+
+    def find_note_subtype_id(self) -> int | None:
+        """The internal "Note" subtype, which notifies nobody by itself."""
+
+        if self._note_subtype_id is None:
+            self._note_subtype_id = self._find_subtype_id(False, NOTE_SUBTYPE_NAME)
+        return self._note_subtype_id
+
+    def _find_subtype_id(self, res_model: str | bool, name: str) -> int | None:
         subtypes = self._call(
-            "mail.message.subtype",
+            SUBTYPE_MODEL,
             "search_read",
-            [("res_model", "=", TICKET_MODEL)],
+            [("res_model", "=", res_model)],
             fields=["id", "name"],
         )
         for subtype in subtypes:
-            if CREATED_SUBTYPE_NAME in str(subtype.get("name", "")).lower():
+            if name in str(subtype.get("name", "")).lower():
                 return subtype["id"]
         return None
 
@@ -206,11 +227,28 @@ class OdooClient:
         self._write(TICKET_MODEL, "write", [ticket_id], values)
 
     def post_note(self, ticket_id: int, body: str) -> None:
-        arguments = {"body": body, "subtype_xmlid": NOTE_SUBTYPE}
+        """Add an internal note; followers of other subtypes stay undisturbed."""
+
+        subtype_id = self.find_note_subtype_id()
+        if subtype_id is None:
+            raise OdooError("The internal 'Note' subtype was not found")
+        self._post_html(ticket_id, body, subtype_id)
+
+    def _post_html(self, ticket_id: int, body: str, subtype_id: int) -> None:
+        values = {
+            "model": TICKET_MODEL,
+            "res_ids": f"[{ticket_id}]",
+            "body": body,
+            "subtype_id": subtype_id,
+            "composition_mode": "comment",
+            "message_type": "comment",
+        }
         if self.note_email_from:
-            arguments["email_from"] = self.note_email_from
+            values["email_from"] = self.note_email_from
         try:
-            self._write(TICKET_MODEL, "message_post", [ticket_id], **arguments)
+            composer = self._write(COMPOSER_MODEL, "create", [values])
+            composer_id = composer[0] if isinstance(composer, list) else composer
+            self._write(COMPOSER_MODEL, "action_send_mail", [composer_id])
         except OdooError as e:
             if not self.note_email_from and "email address" in str(e):
                 raise OdooError(
@@ -233,10 +271,10 @@ class OdooClient:
     def announce_ticket(self, ticket_id: int, body: str) -> None:
         """Post the creation message that notifies the subscribed colleagues."""
 
-        arguments = {"body": body, "subtype_xmlid": CREATED_SUBTYPE}
-        if self.note_email_from:
-            arguments["email_from"] = self.note_email_from
-        self._write(TICKET_MODEL, "message_post", [ticket_id], **arguments)
+        subtype_id = self.find_created_subtype_id()
+        if subtype_id is None:
+            raise OdooError("The 'Ticket Created' subtype was not found")
+        self._post_html(ticket_id, body, subtype_id)
 
     def attach_file(self, ticket_id: int, name: str, data: bytes) -> int:
         """Attach a file to the ticket without posting a message about it."""

@@ -7,6 +7,9 @@ from rrs_helpdesk_bridge.odoo_client import (
     WriteDisabledError,
 )
 
+NOTE_SUBTYPE_ID = 2
+CREATED_SUBTYPE_ID = 4
+
 
 class RecordingClient(OdooClient):
     """An OdooClient with the XML-RPC connection replaced by a recorder."""
@@ -14,6 +17,8 @@ class RecordingClient(OdooClient):
     def __init__(self, write_enabled: bool) -> None:
         self.write_enabled = write_enabled
         self.note_email_from = ""
+        self._created_subtype_id = CREATED_SUBTYPE_ID
+        self._note_subtype_id = NOTE_SUBTYPE_ID
         self.calls: list[tuple] = []
         self.result = [1]
 
@@ -47,15 +52,21 @@ def test_writes_carry_the_quiet_mail_context() -> None:
     assert kwargs["context"] == QUIET_CONTEXT
 
 
-def test_notes_are_internal() -> None:
+def test_notes_are_internal_and_keep_their_html() -> None:
     client = RecordingClient(write_enabled=True)
 
     client.post_note(5, "<p>again</p>")
 
-    _, method, args, kwargs = client.calls[0]
-    assert method == "message_post"
-    assert kwargs["subtype_xmlid"] == "mail.mt_note"
+    model, method, args, kwargs = client.calls[0]
+    values = args[0][0]
+    # The composer's body is an Html field: message_post would escape a plain
+    # string and the markup would show up in the ticket and in the e-mail.
+    assert (model, method) == ("mail.compose.message", "create")
+    assert values["body"] == "<p>again</p>"
+    assert values["subtype_id"] == NOTE_SUBTYPE_ID
+    assert values["res_ids"] == "[5]"
     assert kwargs["context"] == QUIET_CONTEXT
+    assert client.calls[1][1] == "action_send_mail"
 
 
 def test_open_tickets_only_are_deduplicated() -> None:
@@ -87,8 +98,8 @@ def test_note_sender_is_added_when_configured() -> None:
 
     client.post_note(5, "<p>again</p>")
 
-    _, _, _, kwargs = client.calls[0]
-    assert kwargs["email_from"] == "bridge@example.com"
+    _, _, args, _ = client.calls[0]
+    assert args[0][0]["email_from"] == "bridge@example.com"
 
 
 def test_missing_sender_address_is_explained() -> None:
@@ -120,6 +131,26 @@ def test_creation_message_uses_the_helpdesk_subtype() -> None:
 
     client.announce_ticket(5, "<p>new</p>")
 
-    _, method, _, kwargs = client.calls[0]
-    assert method == "message_post"
-    assert kwargs["subtype_xmlid"] == "helpdesk_mgmt.hlp_tck_created"
+    _, method, args, _ = client.calls[0]
+    assert method == "create"
+    assert args[0][0]["subtype_id"] == CREATED_SUBTYPE_ID
+    assert args[0][0]["body"] == "<p>new</p>"
+
+
+def test_missing_note_subtype_is_refused() -> None:
+    client = RecordingClient(write_enabled=True)
+    client._note_subtype_id = None
+    client.result = []
+
+    with pytest.raises(OdooError, match="Note"):
+        client.post_note(5, "<p>again</p>")
+
+
+def test_subtype_lookup_is_cached() -> None:
+    client = RecordingClient(write_enabled=True)
+    client._created_subtype_id = None
+    client.result = [{"id": 7, "name": "Ticket Created"}]
+
+    assert client.find_created_subtype_id() == 7
+    assert client.find_created_subtype_id() == 7
+    assert sum(call[1] == "search_read" for call in client.calls) == 1

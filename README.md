@@ -73,7 +73,13 @@ message to the client, so:
   never made a follower;
 - every mutating call carries `tracking_disable`, `mail_create_nosubscribe`,
   `mail_create_nolog`, and `mail_notrack`;
-- repeat occurrences are added as internal notes (`mail.mt_note`).
+- repeat occurrences are added as internal notes.
+
+Messages are posted through the `mail.compose.message` wizard rather than
+`message_post`: over XML-RPC a body can only be a plain string, and
+`message_post` escapes those, so the HTML reached the ticket and the
+notification e-mail as visible markup. The composer's body is an Html field
+and is stored as written.
 
 ### Odoo is the source of truth for deduplication
 
