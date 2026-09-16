@@ -156,7 +156,10 @@ address. Give that user one, or set `RRSB_NOTE_EMAIL_FROM`.
 
 Locally an interactive `pass-cli login` session is enough. On a server, use a
 Proton Pass agent token limited to that item; `PROTON_PASS_AGENT_REASON` is set
-automatically unless provided. The Odoo user behind the API key only needs
+automatically unless provided. Such a token cannot see the vault that holds the
+item, so when the lookup by vault name fails the item is found in
+`pass-cli share list` by title and read through its own share; the vault in the
+table above still describes where it lives for a human session. The Odoo user behind the API key only needs
 helpdesk rights (read, write, create — no delete).
 
 ## Usage
