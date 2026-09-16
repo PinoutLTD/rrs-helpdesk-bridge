@@ -7,9 +7,10 @@ Report Service: the connector collects, downloads, and decrypts reports from
 clients' Home Assistant servers, this service files them where the company
 already works with its clients.
 
-> **Current status:** implemented and covered by tests against a fake Odoo; not
-> yet verified against the live test database and not yet deployed. Writing is
-> off by default — every run is a dry run unless `--write` is given.
+> **Current status:** verified end to end against the test Odoo database on
+> 2026-09-16 with real reports — three tickets, attachments, a repeat note, and
+> no mail queued, no followers created. Not deployed yet. Writing is off by
+> default — every run is a dry run unless `--write` is given.
 
 ## Scope
 
@@ -115,6 +116,7 @@ usually in a local `.env` (see `.env.example`):
 | `RRSB_STAGE_ID` | opening stage for new tickets (default `1`) |
 | `RRSB_CHANNEL_ID` | ticket channel (default `4`) |
 | `RRSB_COMPANY_ID` | company (default `1`) |
+| `RRSB_NOTE_EMAIL_FROM` | sender address for notes, when the API user has no e-mail |
 | `RRSB_ATTACH_FILES` | attach decrypted files to tickets (default `true`) |
 | `RRSB_MAX_ATTACHMENT_BYTES` | per-file attachment limit (default 5 MiB) |
 
@@ -133,6 +135,9 @@ No credentials live on disk. The profile selects a Proton Pass item read through
 | --- | --- | --- |
 | `test` | `Report Service` | `Odoo API Test` |
 | `prod` | `Smart Home Agent` | `Odoo API` |
+
+Odoo refuses `message_post` when the user behind the API key has no e-mail
+address. Give that user one, or set `RRSB_NOTE_EMAIL_FROM`.
 
 Locally an interactive `pass-cli login` session is enough. On a server, use a
 Proton Pass agent token limited to that item; `PROTON_PASS_AGENT_REASON` is set
@@ -181,8 +186,8 @@ them.
 
 ## Not done yet
 
-- verification against the test Odoo database (`odoo-check`, dry run, then a
-  measured write with `mail_mail` and `mail_message` counted before and after);
+- a run against the production Odoo (`odoo-check` and a dry run on the `prod`
+  profile);
 - deployment: service user, Proton Pass agent token, systemd timer next to the
   connector's;
 - what happens to a ticket when the connector deletes the report files
