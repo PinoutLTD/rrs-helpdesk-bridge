@@ -16,7 +16,10 @@ def test_report_becomes_a_ticket(settings, registry, odoo, store, reports_dir) -
     assert result.exit_code == 0
     (ticket,) = odoo.tickets.values()
     assert ticket["name"].startswith(f"[{CLIENT_ID}] System log:")
-    assert ticket["partner_id"] == PARTNER_ID
+    # Clients must receive nothing: the ticket is not linked to their contact,
+    # the description only points at it.
+    assert "partner_id" not in ticket
+    assert f"id={PARTNER_ID}&model=res.partner" in ticket["description"]
     assert ticket["stage_id"] == settings.stage_id
     assert ticket["channel_id"] == settings.channel_id
     assert ticket["priority"] == "2"
@@ -46,6 +49,8 @@ def test_no_mail_fields_are_ever_written(
     (ticket,) = odoo.tickets.values()
     assert "partner_email" not in ticket
     assert "email_cc" not in ticket
+    # The closing stages mail the ticket's partner; without one they mail no one.
+    assert "partner_id" not in ticket
     # The opening stage only; closing stages carry a customer e-mail template.
     assert ticket["stage_id"] == 1
 
@@ -253,3 +258,16 @@ def test_deleted_files_do_not_stop_the_ticket(
     assert [name for _, name, _ in odoo.attachments] == [
         "datalog_94_1789114351000-issue_description.json"
     ]
+
+
+def test_linking_the_client_contact_is_opt_in(
+    settings, registry, odoo, store, reports_dir
+) -> None:
+    make_report(reports_dir, 94, 1789114351000, LOG_ISSUE)
+    settings = settings.model_copy(update={"link_client_partner": True})
+
+    run_once(settings, registry, odoo, store, dry_run=False)
+
+    (ticket,) = odoo.tickets.values()
+    assert ticket["partner_id"] == PARTNER_ID
+    assert "Client record in Odoo" not in ticket["description"]

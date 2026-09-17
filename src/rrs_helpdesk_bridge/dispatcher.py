@@ -157,10 +157,11 @@ def open_ticket(
     partner_id = registry.partner_id(report.manifest.client_id)
     values = build_ticket_values(
         report,
-        partner_id,
+        partner_id if settings.link_client_partner else None,
         stage_id=settings.stage_id,
         channel_id=settings.channel_id,
         company_id=settings.company_id,
+        client_partner_id=partner_id,
     )
     ticket_id = odoo.create_ticket(values)
     attach_files(odoo, ticket_id, report, settings)

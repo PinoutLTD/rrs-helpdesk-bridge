@@ -71,6 +71,10 @@ message to the client, so:
   this service never sets a closing stage;
 - `partner_email` and `email_cc` are never written, and the client partner is
   never made a follower;
+- tickets are **not linked** to the client's contact (`partner_id`) unless
+  `RRSB_LINK_CLIENT_PARTNER=true`. The closing stages' template writes to the
+  ticket's partner, so a linked ticket closed by a person would e-mail the
+  client. The description points at the contact instead, which reaches no one;
 - every mutating call carries `tracking_disable`, `mail_create_nosubscribe`,
   `mail_create_nolog`, and `mail_notrack`;
 - repeat occurrences are added as internal notes.
@@ -138,6 +142,7 @@ usually in a local `.env` (see `.env.example`):
 | `RRSB_CHANNEL_ID` | ticket channel (default `4`) |
 | `RRSB_COMPANY_ID` | company (default `1`) |
 | `RRSB_NOTE_EMAIL_FROM` | sender address for notes, when the API user has no e-mail |
+| `RRSB_LINK_CLIENT_PARTNER` | link tickets to the client's contact; off, so closing a ticket mails no client (default `false`) |
 | `RRSB_ATTACH_FILES` | attach decrypted files to tickets (default `true`) |
 | `RRSB_MAX_ATTACHMENT_BYTES` | per-file attachment limit (default 5 MiB) |
 

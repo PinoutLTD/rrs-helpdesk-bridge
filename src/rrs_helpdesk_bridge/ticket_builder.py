@@ -208,9 +208,22 @@ def files_html(report: Report) -> str:
     return f"<p><b>Files in the report</b></p><ul>{items}</ul>"
 
 
-def ticket_description(report: Report) -> str:
+def client_reference_html(partner_id: int) -> str:
+    """Where the client lives in Odoo, without making them a recipient."""
+
+    link = f"/web#id={partner_id}&model=res.partner&view_type=form"
+    return (
+        f'<p>Client record in Odoo: <a href="{link}">contact #{partner_id}</a>. '
+        "Not linked to this ticket on purpose, so that closing it sends the "
+        "client nothing.</p>"
+    )
+
+
+def ticket_description(report: Report, client_partner_id: int | None = None) -> str:
     issue = report.issue
     parts = ["<p>Reported by the Robonomics Report Service.</p>", report_facts(report)]
+    if client_partner_id is not None:
+        parts.append(client_reference_html(client_partner_id))
     if issue is None:
         parts.append("<p>The report carries logs only, without a described issue.</p>")
     else:
@@ -227,17 +240,21 @@ def build_ticket_values(
     stage_id: int,
     channel_id: int,
     company_id: int,
+    client_partner_id: int | None = None,
 ) -> dict:
     """Values for creating a helpdesk ticket.
 
     `partner_email` and `email_cc` are deliberately absent, and `stage_id` is
-    always the opening stage: this service must never mail a client.
+    always the opening stage: this service must never mail a client. A
+    `partner_id` is set only when linking was explicitly enabled; otherwise the
+    client is referenced in the description instead, which reaches no one.
     """
 
     issue = report.issue or ReportIssue()
+    reference = client_partner_id if partner_id is None else None
     values = {
         "name": ticket_title(report.manifest.client_id, issue),
-        "description": ticket_description(report),
+        "description": ticket_description(report, reference),
         "company_id": company_id,
         "stage_id": stage_id,
         "channel_id": channel_id,

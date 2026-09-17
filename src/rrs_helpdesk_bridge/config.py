@@ -47,6 +47,11 @@ class EnvSettings(BaseSettings):
     # Odoo refuses message_post when the API user has no e-mail address: set
     # one on that user, or put a sender address here.
     note_email_from: str = ""
+    # Link tickets to the client's res.partner. Off by default: the closing
+    # stages carry a customer e-mail template addressed to the ticket's partner,
+    # so a linked ticket closed by a person would write to the client — and
+    # clients are not to receive anything from this service yet.
+    link_client_partner: bool = False
     attach_files: bool = True
     # Odoo stores attachments base64-encoded in the database.
     max_attachment_bytes: PositiveInt = 5 * 1024 * 1024

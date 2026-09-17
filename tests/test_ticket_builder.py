@@ -169,3 +169,14 @@ def test_truncated_lists_say_how_much_is_hidden(reports_dir) -> None:
     assert "Device 29" in description
     assert "Device 30" not in description
     assert "and 10 more unavailable" in description
+
+
+def test_client_is_referenced_but_not_linked_by_default(reports_dir) -> None:
+    report = report_for(reports_dir, LOG_ISSUE)
+
+    values = build_ticket_values(
+        report, None, stage_id=1, channel_id=4, company_id=1, client_partner_id=7
+    )
+
+    assert "partner_id" not in values
+    assert "id=7&model=res.partner" in values["description"]
