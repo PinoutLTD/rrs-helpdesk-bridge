@@ -16,6 +16,7 @@ from rrs_helpdesk_bridge.manifests import (
     Report,
     find_manifests,
     load_report,
+    read_manifest,
     resolve_inside,
 )
 from rrs_helpdesk_bridge.odoo_client import OdooClient, TicketSummary
@@ -272,13 +273,17 @@ def load_pending_reports(
     for manifest_path in find_manifests(reports_dir):
         result.seen += 1
         try:
-            report = load_report(manifest_path)
+            # Whether it was handled is decided by the manifest alone: the
+            # files of an old report may be gone by now, and they are not
+            # needed to skip it.
+            manifest = read_manifest(manifest_path)
+            if store.is_handled(manifest.report_id):
+                result.handled += 1
+                continue
+            report = load_report(manifest_path, manifest)
         except ManifestError as e:
             LOGGER.error("Cannot read %s: %s", manifest_path, e)
             result.unreadable += 1
-            continue
-        if store.is_handled(report.manifest.report_id):
-            result.handled += 1
             continue
         reports.append(report)
     # Oldest report first, so a ticket's notes read in chronological order.

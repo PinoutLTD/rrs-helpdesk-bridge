@@ -69,7 +69,14 @@ class Report(BaseModel):
 
 
 def read_json(path: Path, max_bytes: int) -> dict:
-    size = path.stat().st_size
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError as e:
+        # The connector removes decrypted files by age; a report older than
+        # that keeps its manifest and loses the files it points to.
+        raise ManifestError(f"{path.name} is gone: {e.strerror}") from e
+    except OSError as e:
+        raise ManifestError(f"{path.name}: {e}") from e
     if size > max_bytes:
         raise ManifestError(f"{path.name}: {size} bytes exceeds {max_bytes}")
     try:
@@ -90,8 +97,9 @@ def resolve_inside(directory: Path, relative_path: str) -> Path:
     return path
 
 
-def load_report(manifest_path: Path) -> Report:
-    directory = manifest_path.parent
+def read_manifest(manifest_path: Path) -> ReportManifest:
+    """The manifest alone: enough to tell whether the report was handled."""
+
     try:
         manifest = ReportManifest.model_validate(
             read_json(manifest_path, MAX_MANIFEST_BYTES)
@@ -104,11 +112,27 @@ def load_report(manifest_path: Path) -> Report:
             f"unsupported contract_version {manifest.contract_version}, "
             f"this bridge reads version {SUPPORTED_CONTRACT_VERSION}"
         )
+    return manifest
+
+
+def load_report(manifest_path: Path, manifest: ReportManifest | None = None) -> Report:
+    """The manifest and the issue it points to.
+
+    Read only for reports still to be filed: the issue file of an old report
+    may already be removed by the connector's retention.
+    """
+
+    directory = manifest_path.parent
+    if manifest is None:
+        manifest = read_manifest(manifest_path)
 
     issue = None
     if manifest.issue_file:
         issue_path = resolve_inside(directory, manifest.issue_file)
-        issue = ReportIssue.model_validate(read_json(issue_path, MAX_ISSUE_BYTES))
+        try:
+            issue = ReportIssue.model_validate(read_json(issue_path, MAX_ISSUE_BYTES))
+        except ValidationError as e:
+            raise ManifestError(f"{issue_path.name}: {e}") from e
 
     return Report(manifest=manifest, directory=directory, issue=issue)
 
