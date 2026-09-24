@@ -271,3 +271,37 @@ def test_linking_the_client_contact_is_opt_in(
     (ticket,) = odoo.tickets.values()
     assert ticket["partner_id"] == PARTNER_ID
     assert "Client record in Odoo" not in ticket["description"]
+
+
+def test_an_old_handled_report_without_its_files_does_not_stop_the_run(
+    settings, registry, odoo, store, reports_dir
+) -> None:
+    # What the connector's retention leaves after 7 days: the manifest stays,
+    # the decrypted directory — issue file included — is gone. On 2026-09-23
+    # one such report stopped every run, and no ticket was filed for a day.
+    import shutil
+
+    old = make_report(reports_dir, 94, 1789114351000, LOG_ISSUE)
+    run_once(settings, registry, odoo, store, dry_run=False)
+    shutil.rmtree(old / "decrypted")
+    make_report(reports_dir, 95, 1789117951000, ENTITIES_ISSUE)
+
+    result = run_once(settings, registry, odoo, store, dry_run=False)
+
+    assert result.handled == 1
+    assert result.unreadable == 0
+    assert result.created == 1
+
+
+def test_a_new_report_whose_issue_file_is_gone_is_skipped_not_fatal(
+    settings, registry, odoo, store, reports_dir
+) -> None:
+    gone = make_report(reports_dir, 94, 1789114351000, LOG_ISSUE)
+    (gone / "decrypted" / "issue_description.json").unlink()
+    make_report(reports_dir, 95, 1789117951000, ENTITIES_ISSUE)
+
+    result = run_once(settings, registry, odoo, store, dry_run=False)
+
+    assert result.unreadable == 1
+    assert result.created == 1
+
