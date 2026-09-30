@@ -276,6 +276,17 @@ class OdooClient:
             raise OdooError("The 'Ticket Created' subtype was not found")
         self._post_html(ticket_id, body, subtype_id)
 
+    def attachment_checksums(self, ticket_id: int) -> frozenset[str]:
+        """Checksums of the files the ticket carries (SHA-1, as Odoo stores them)."""
+
+        records = self._call(
+            ATTACHMENT_MODEL,
+            "search_read",
+            [("res_model", "=", TICKET_MODEL), ("res_id", "=", ticket_id)],
+            fields=["checksum"],
+        )
+        return frozenset(r["checksum"] for r in records if r.get("checksum"))
+
     def attach_file(self, ticket_id: int, name: str, data: bytes) -> int:
         """Attach a file to the ticket without posting a message about it."""
 

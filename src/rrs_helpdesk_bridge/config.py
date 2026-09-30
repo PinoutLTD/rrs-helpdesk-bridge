@@ -53,6 +53,9 @@ class EnvSettings(BaseSettings):
     # clients are not to receive anything from this service yet.
     link_client_partner: bool = False
     attach_files: bool = True
+    # A report appended to an open ticket attaches only its own period of each
+    # log, and nothing the ticket already holds (see attachments.py).
+    trim_repeated_logs: bool = True
     # Odoo stores attachments base64-encoded in the database.
     max_attachment_bytes: PositiveInt = 5 * 1024 * 1024
 

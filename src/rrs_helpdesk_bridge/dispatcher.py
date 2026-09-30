@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rrs_helpdesk_bridge.attachments import AttachmentPlan, plan_attachments
 from rrs_helpdesk_bridge.config import ClientRegistry, EnvSettings
 from rrs_helpdesk_bridge.manifests import (
     ManifestError,
@@ -17,7 +18,6 @@ from rrs_helpdesk_bridge.manifests import (
     find_manifests,
     load_report,
     read_manifest,
-    resolve_inside,
 )
 from rrs_helpdesk_bridge.odoo_client import OdooClient, TicketSummary
 from rrs_helpdesk_bridge.state import Action, StateStore
@@ -65,40 +65,16 @@ class RunResult:
         return 3 if self.failed or self.unreadable else 0
 
 
-def attachment_payloads(
-    report: Report, settings: EnvSettings
-) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Read the decrypted files that fit the size limit."""
-
-    payloads: list[tuple[str, bytes]] = []
-    skipped: list[str] = []
-    for file in report.manifest.files:
-        if file.size_bytes > settings.max_attachment_bytes:
-            skipped.append(f"{file.name} (too large)")
-            continue
-        path = resolve_inside(report.directory, file.path)
-        # The connector deletes artifacts by age, so a listed file may be gone
-        # by the time an old report is filed. The ticket is still worth having.
-        if not path.exists():
-            skipped.append(f"{file.name} (already deleted)")
-            continue
-        payloads.append((f"{report.directory.name}-{file.name}", path.read_bytes()))
-    return payloads, skipped
-
-
 def attach_files(
-    odoo: OdooClient, ticket_id: int, report: Report, settings: EnvSettings
+    odoo: OdooClient, ticket_id: int, report: Report, plan: AttachmentPlan
 ) -> None:
-    if not settings.attach_files:
-        return
-    payloads, skipped = attachment_payloads(report, settings)
-    for name, data in payloads:
+    for name, data in plan.payloads:
         odoo.attach_file(ticket_id, name, data)
-    if skipped:
+    if plan.skipped:
         LOGGER.warning(
             "Report %s: not attached: %s",
             report.manifest.report_id,
-            ", ".join(skipped),
+            ", ".join(plan.skipped),
         )
 
 
@@ -165,7 +141,9 @@ def open_ticket(
         client_partner_id=partner_id,
     )
     ticket_id = odoo.create_ticket(values)
-    attach_files(odoo, ticket_id, report, settings)
+    if settings.attach_files:
+        # The report that opens a ticket carries its whole history.
+        attach_files(odoo, ticket_id, report, plan_attachments(report, settings))
     return ticket_id, None if partner_id else NO_PARTNER_DETAIL
 
 
@@ -176,14 +154,18 @@ def append_to_ticket(
     settings: EnvSettings,
 ) -> None:
     count = ticket.count + 1
+    plan = AttachmentPlan()
+    if settings.attach_files:
+        on_ticket = odoo.attachment_checksums(ticket.id)
+        plan = plan_attachments(report, settings, repeat=True, on_ticket=on_ticket)
     # The note goes first: if anything below fails, the retry starts from the
     # same ticket counter and cannot inflate it. A repeated note is visible,
     # a wrong number is not.
-    odoo.post_note(ticket.id, build_repeat_note(report, count))
+    odoo.post_note(ticket.id, build_repeat_note(report, count, plan.notes))
     odoo.update_ticket(
         ticket.id, {"count": count, "last_occurred": last_occurred(report)}
     )
-    attach_files(odoo, ticket.id, report, settings)
+    attach_files(odoo, ticket.id, report, plan)
 
 
 def dispatch_report(
