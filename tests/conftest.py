@@ -130,6 +130,7 @@ class FakeOdoo:
         self.notes: list[tuple[int, str]] = []
         self.attachments: list[tuple[int, str, int]] = []
         self.attached_data: list[tuple[int, str, bytes]] = []
+        self.closed: set[int] = set()
         self.updates: list[tuple[int, dict]] = []
         self._next_id = 100
 
@@ -206,6 +207,10 @@ class FakeOdoo:
 
         signature = self.tickets[ticket_id]["source"]
         self.open_by_signature.pop(signature, None)
+        self.closed.add(ticket_id)
+
+    def closed_ticket_ids(self, ticket_ids: list[int]) -> set[int]:
+        return self.closed & set(ticket_ids)
 
 
 @pytest.fixture
