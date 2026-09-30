@@ -280,12 +280,23 @@ def build_new_ticket_notice(report: Report) -> str:
     )
 
 
-def build_repeat_note(report: Report, count: int) -> str:
-    """An internal note added when the same problem is reported again."""
+def build_repeat_note(
+    report: Report, count: int, files: list[str] | None = None
+) -> str:
+    """An internal note added when the same problem is reported again.
+
+    `files` says what was trimmed or left out of the attachments, so a reader
+    knows the earlier reports hold the rest.
+    """
 
     issue = report.issue or ReportIssue()
     headline = escape(issue.summary or issue_label(issue.type))
+    files_html = ""
+    if files:
+        items = "".join(f"<li>{escape(line)}</li>" for line in files)
+        files_html = f"<p><b>Attached files</b></p><ul>{items}</ul>"
     return (
         f"<p><b>Reported again</b> (report {count} for this ticket): {headline}</p>"
-        f"{report_facts(report)}{details_html(issue) if report.issue else ''}"
+        f"{report_facts(report)}{files_html}"
+        f"{details_html(issue) if report.issue else ''}"
     )

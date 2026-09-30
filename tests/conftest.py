@@ -68,6 +68,7 @@ def make_report(
     contract_version: int = 1,
     log_bytes: int = 64,
     issue_file: str | None = "decrypted/issue_description.json",
+    extra_files: dict[str, bytes] | None = None,
 ) -> Path:
     """Write a report directory exactly as rrs-connector leaves it."""
 
@@ -75,15 +76,13 @@ def make_report(
     decrypted = directory / "decrypted"
     decrypted.mkdir(parents=True)
     (directory / "archive.zip").write_bytes(b"encrypted archive")
-    (decrypted / "home-assistant.log").write_bytes(b"x" * log_bytes)
-
-    files = [
-        {
-            "name": "home-assistant.log",
-            "path": "decrypted/home-assistant.log",
-            "size_bytes": log_bytes,
-        }
-    ]
+    contents = {"home-assistant.log": b"x" * log_bytes, **(extra_files or {})}
+    files = []
+    for name, data in contents.items():
+        (decrypted / name).write_bytes(data)
+        files.append(
+            {"name": name, "path": f"decrypted/{name}", "size_bytes": len(data)}
+        )
     if issue is not None:
         payload = json.dumps(issue, ensure_ascii=False).encode("utf-8")
         (decrypted / "issue_description.json").write_bytes(payload)
@@ -130,6 +129,7 @@ class FakeOdoo:
         self.open_by_signature: dict[str, int] = {}
         self.notes: list[tuple[int, str]] = []
         self.attachments: list[tuple[int, str, int]] = []
+        self.attached_data: list[tuple[int, str, bytes]] = []
         self.updates: list[tuple[int, dict]] = []
         self._next_id = 100
 
@@ -189,7 +189,17 @@ class FakeOdoo:
     def attach_file(self, ticket_id: int, name: str, data: bytes) -> int:
         self._guard("attachment")
         self.attachments.append((ticket_id, name, len(data)))
+        self.attached_data.append((ticket_id, name, data))
         return len(self.attachments)
+
+    def attachment_checksums(self, ticket_id: int) -> frozenset[str]:
+        import hashlib
+
+        return frozenset(
+            hashlib.sha1(data).hexdigest()
+            for tid, _, data in self.attached_data
+            if tid == ticket_id
+        )
 
     def close(self, ticket_id: int) -> None:
         """Simulate a human closing the ticket in Odoo."""
