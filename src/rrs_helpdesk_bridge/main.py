@@ -7,8 +7,9 @@ from rrs_helpdesk_bridge.dispatcher import run_once
 from rrs_helpdesk_bridge.logging_config import setup_logging
 from rrs_helpdesk_bridge.manifests import ManifestError, find_manifests
 from rrs_helpdesk_bridge.odoo_client import OdooClient
-from rrs_helpdesk_bridge.secrets import load_odoo_credentials
+from rrs_helpdesk_bridge.secrets import load_odoo_credentials, load_pinata_unpin_key
 from rrs_helpdesk_bridge.state import StateStore
+from rrs_helpdesk_bridge.unpin import PinataUnpinner
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +115,22 @@ def main() -> int:
 
         odoo = connect(settings, write_enabled)
         store = StateStore(settings.state_db)
-        result = run_once(settings, registry, odoo, store, dry_run=not write_enabled)
+        def unpinner() -> PinataUnpinner:
+            # Read only when something is due, so a run with nothing to unpin
+            # does not touch the key.
+            key, secret = load_pinata_unpin_key(
+                settings.pinata_unpin_vault, settings.pinata_unpin_item
+            )
+            return PinataUnpinner(key, secret)
+
+        result = run_once(
+            settings,
+            registry,
+            odoo,
+            store,
+            dry_run=not write_enabled,
+            unpinner=unpinner,
+        )
         return result.exit_code
     except Exception:
         LOGGER.exception("Application failed")

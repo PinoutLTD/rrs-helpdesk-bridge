@@ -93,6 +93,13 @@ class PassItem:
         return value
 
 
+def load_pinata_unpin_key(vault: str, item_title: str) -> tuple[SecretStr, SecretStr]:
+    """The unpin-only key pair made by `rrs-admin pinata-unpin-key`."""
+
+    item = PassItem(vault, item_title)
+    return SecretStr(item.field("API Key")), SecretStr(item.field("API Secret"))
+
+
 def load_odoo_credentials(vault: str, item_title: str) -> OdooCredentials:
     item = PassItem(vault, item_title)
     values = {field: item.field(field) for field in FIELDS}

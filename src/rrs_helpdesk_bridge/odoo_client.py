@@ -276,6 +276,19 @@ class OdooClient:
             raise OdooError("The 'Ticket Created' subtype was not found")
         self._post_html(ticket_id, body, subtype_id)
 
+    def closed_ticket_ids(self, ticket_ids: list[int]) -> set[int]:
+        """Which of these tickets sit in a closing stage (Done, Cancelled)."""
+
+        if not ticket_ids:
+            return set()
+        return set(
+            self._call(
+                TICKET_MODEL,
+                "search",
+                [("id", "in", ticket_ids), ("stage_id.closed", "=", True)],
+            )
+        )
+
     def attachment_checksums(self, ticket_id: int) -> frozenset[str]:
         """Checksums of the files the ticket carries (SHA-1, as Odoo stores them)."""
 

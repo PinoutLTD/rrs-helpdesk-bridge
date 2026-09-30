@@ -7,7 +7,9 @@ prints it, and records nothing.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from rrs_helpdesk_bridge.attachments import AttachmentPlan, plan_attachments
@@ -28,6 +30,7 @@ from rrs_helpdesk_bridge.ticket_builder import (
     last_occurred,
     ticket_signature,
 )
+from rrs_helpdesk_bridge.unpin import Unpinner, unpin_reports
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,12 +60,25 @@ class RunResult:
     failed: int = 0
     unreadable: int = 0
     notified: int = 0
+    unpinned: int = 0
+    unpin_failed: int = 0
+    unpin_planned: list[str] = field(default_factory=list)
     dry_run: bool = True
     planned: list[str] = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
         return 3 if self.failed or self.unreadable else 0
+
+
+def published_at(manifest) -> str:
+    return manifest.datalog_timestamp.astimezone(UTC).isoformat()
+
+
+def source(manifest) -> dict[str, str]:
+    """What unpinning needs later, after the connector deleted the report."""
+
+    return {"cid": manifest.cid, "published_at": published_at(manifest)}
 
 
 def attach_files(
@@ -190,6 +206,7 @@ def dispatch_report(
                 "",
                 Action.SKIPPED,
                 detail=NO_ISSUE_DETAIL,
+                **source(manifest),
             )
         return
 
@@ -221,6 +238,7 @@ def dispatch_report(
             Action.CREATED,
             ticket_id,
             detail,
+            **source(manifest),
         )
         result.created += 1
         LOGGER.info(
@@ -238,6 +256,7 @@ def dispatch_report(
         signature,
         Action.APPENDED,
         existing.id,
+        **source(manifest),
     )
     result.appended += 1
     LOGGER.info(
@@ -260,6 +279,11 @@ def load_pending_reports(
             # needed to skip it.
             manifest = read_manifest(manifest_path)
             if store.is_handled(manifest.report_id):
+                # Reports handled before the CID was recorded get it now, while
+                # the connector still has their manifest (it keeps 30 days).
+                store.remember_source(
+                    manifest.report_id, manifest.cid, published_at(manifest)
+                )
                 result.handled += 1
                 continue
             report = load_report(manifest_path, manifest)
@@ -278,7 +302,15 @@ def run_once(
     odoo: OdooClient,
     store: StateStore,
     dry_run: bool = True,
+    unpinner: Callable[[], Unpinner] | None = None,
+    now: datetime | None = None,
 ) -> RunResult:
+    """File pending reports, then unpin what is due.
+
+    `unpinner` makes the Pinata client; it is called only when something is
+    due, and only when this is not a dry run and unpinning is enabled.
+    """
+
     result = RunResult(dry_run=dry_run)
     reports = load_pending_reports(settings.reports_dir, store, result)
     recipients = resolve_recipients(odoo, registry) if reports else Recipients()
@@ -300,9 +332,26 @@ def run_once(
                     detail=str(e),
                 )
 
+    try:
+        unpin = unpin_reports(
+            store,
+            odoo,
+            now or datetime.now(UTC),
+            timedelta(days=settings.unpin_after_days),
+            unpinner if settings.unpin_enabled and not dry_run else None,
+        )
+        result.unpinned = unpin.unpinned + unpin.already_gone
+        result.unpin_failed = unpin.failed
+        result.unpin_planned = unpin.planned
+    except Exception:
+        # Filing is the job; unpinning can wait for the next run.
+        LOGGER.exception("Unpinning failed")
+        result.unpin_failed += 1
+
     LOGGER.info(
         "Run finished%s: manifests=%d already handled=%d unreadable=%d; "
-        "tickets created=%d appended=%d notified=%d; skipped=%d failed=%d",
+        "tickets created=%d appended=%d notified=%d; skipped=%d failed=%d; "
+        "unpinned=%d unpin failed=%d would unpin=%d",
         " (dry run, nothing was written)" if dry_run else "",
         result.seen,
         result.handled,
@@ -312,5 +361,8 @@ def run_once(
         result.notified,
         result.skipped,
         result.failed,
+        result.unpinned,
+        result.unpin_failed,
+        len(result.unpin_planned),
     )
     return result

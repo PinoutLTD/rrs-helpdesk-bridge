@@ -56,6 +56,13 @@ class EnvSettings(BaseSettings):
     # A report appended to an open ticket attaches only its own period of each
     # log, and nothing the ticket already holds (see attachments.py).
     trim_repeated_logs: bool = True
+    # Unpin a report's archive from Pinata once its ticket is closed, or after
+    # this many days (see unpin.py). Off until set: a run without it only says
+    # what it would unpin.
+    unpin_enabled: bool = False
+    unpin_after_days: PositiveInt = 183
+    pinata_unpin_vault: str = "Report Service"
+    pinata_unpin_item: str = "rrs-unpin (Pinata)"
     # Odoo stores attachments base64-encoded in the database.
     max_attachment_bytes: PositiveInt = 5 * 1024 * 1024
 
