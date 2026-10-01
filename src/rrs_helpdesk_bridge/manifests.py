@@ -39,9 +39,12 @@ class ReportManifest(BaseModel):
     report_id: str
     client_id: str
     sender_address: str
-    datalog_index: int
-    datalog_timestamp: datetime
-    cid: str
+    # A report the connector writes itself (a site gone silent) has no
+    # datalog record, CID or archive behind it: source "connector".
+    source: str = "site"
+    datalog_index: int | None = None
+    datalog_timestamp: datetime | None = None
+    cid: str | None = None
     processed_at: datetime
     issue_file: str | None = None
     files: list[ManifestFile] = []

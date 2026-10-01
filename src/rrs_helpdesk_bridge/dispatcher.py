@@ -24,6 +24,7 @@ from rrs_helpdesk_bridge.manifests import (
 from rrs_helpdesk_bridge.odoo_client import OdooClient, TicketSummary
 from rrs_helpdesk_bridge.state import Action, StateStore
 from rrs_helpdesk_bridge.ticket_builder import (
+    SITE_BACK,
     build_new_ticket_notice,
     build_repeat_note,
     build_ticket_values,
@@ -35,6 +36,7 @@ from rrs_helpdesk_bridge.unpin import Unpinner, unpin_reports
 LOGGER = logging.getLogger(__name__)
 
 NO_ISSUE_DETAIL = "report carries logs only, without an issue"
+NO_SILENCE_DETAIL = "site back, and no open ticket says it was silent"
 NO_PARTNER_DETAIL = "client_id is not in the registry, ticket has no partner"
 
 
@@ -71,12 +73,17 @@ class RunResult:
         return 3 if self.failed or self.unreadable else 0
 
 
-def published_at(manifest) -> str:
+def published_at(manifest) -> str | None:
+    if manifest.datalog_timestamp is None:
+        return None
     return manifest.datalog_timestamp.astimezone(UTC).isoformat()
 
 
-def source(manifest) -> dict[str, str]:
-    """What unpinning needs later, after the connector deleted the report."""
+def source(manifest) -> dict[str, str | None]:
+    """What unpinning needs later, after the connector deleted the report.
+
+    A service report of the connector has nothing pinned: no CID.
+    """
 
     return {"cid": manifest.cid, "published_at": published_at(manifest)}
 
@@ -213,6 +220,22 @@ def dispatch_report(
     signature = ticket_signature(manifest.client_id, report.issue)
     existing = odoo.find_open_ticket(signature)
 
+    # "Back" belongs in the ticket that said the site was silent; with that
+    # ticket closed already, there is nobody left to tell.
+    if report.issue.type == SITE_BACK and existing is None:
+        LOGGER.info("Report %s: %s, no ticket", manifest.report_id, NO_SILENCE_DETAIL)
+        result.skipped += 1
+        if not dry_run:
+            store.record(
+                manifest.report_id,
+                manifest.client_id,
+                signature,
+                Action.SKIPPED,
+                detail=NO_SILENCE_DETAIL,
+                **source(manifest),
+            )
+        return
+
     if dry_run:
         action = f"append to {existing.number}" if existing else "create a ticket"
         LOGGER.info(
@@ -281,9 +304,10 @@ def load_pending_reports(
             if store.is_handled(manifest.report_id):
                 # Reports handled before the CID was recorded get it now, while
                 # the connector still has their manifest (it keeps 30 days).
-                store.remember_source(
-                    manifest.report_id, manifest.cid, published_at(manifest)
-                )
+                if manifest.cid:
+                    store.remember_source(
+                        manifest.report_id, manifest.cid, published_at(manifest)
+                    )
                 result.handled += 1
                 continue
             report = load_report(manifest_path, manifest)
