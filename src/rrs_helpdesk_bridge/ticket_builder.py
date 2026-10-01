@@ -18,7 +18,16 @@ ISSUE_LABELS = {
     "accumulated_system_log_problems": "System log",
     "entities_health_problems": "Entities health",
     "host_health": "Host health",
+    "site_silent": "Site silent",
+    "site_back": "Site back",
 }
+
+# Service reports of the connector (rrs-connector watchdog.py).
+SITE_SILENT = "site_silent"
+SITE_BACK = "site_back"
+# Issue types filed into the ticket of another type: a site coming back is
+# told in the ticket that said it was silent.
+SIGNATURE_TYPES = {SITE_BACK: SITE_SILENT}
 
 PRIORITY_MEDIUM = "1"
 PRIORITY_HIGH = "2"
@@ -48,7 +57,8 @@ def issue_fingerprint(issue: ReportIssue) -> str:
 
 
 def ticket_signature(client_id: str, issue: ReportIssue) -> str:
-    source = f"{client_id}|{issue.type}|{issue_fingerprint(issue)}"
+    issue_type = SIGNATURE_TYPES.get(issue.type, issue.type)
+    source = f"{client_id}|{issue_type}|{issue_fingerprint(issue)}"
     return hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
 
 
@@ -65,7 +75,11 @@ def ticket_priority(issue: ReportIssue) -> str:
     levels = {str(level).upper() for level in by_level}
     if "CRITICAL" in levels:
         return PRIORITY_VERY_HIGH
-    if "ERROR" in levels or issue.type in ("entities_health_problems", "host_health"):
+    if "ERROR" in levels or issue.type in (
+        "entities_health_problems",
+        "host_health",
+        SITE_SILENT,
+    ):
         return PRIORITY_HIGH
     return PRIORITY_MEDIUM
 
@@ -89,7 +103,8 @@ def odoo_datetime(value: datetime) -> str:
 def last_occurred(report: Report) -> str:
     issue = report.issue
     occurred = parse_timestamp(issue.ts_end) if issue else None
-    return odoo_datetime(occurred or report.manifest.datalog_timestamp)
+    occurred = occurred or report.manifest.datalog_timestamp
+    return odoo_datetime(occurred or report.manifest.processed_at)
 
 
 def escape(value: object) -> str:
@@ -116,13 +131,18 @@ def report_facts(report: Report) -> str:
     rows = [
         ("Site", escape(manifest.client_id)),
         ("Report", escape(manifest.report_id)),
-        (
-            "Datalog",
-            f"#{manifest.datalog_index} at {escape(manifest.datalog_timestamp)}",
-        ),
-        ("IPFS CID", escape(manifest.cid)),
-        ("Sender", escape(manifest.sender_address)),
     ]
+    if manifest.cid is None:
+        rows.append(("Source", "Report Service connector, not a report of the site"))
+    else:
+        rows += [
+            (
+                "Datalog",
+                f"#{manifest.datalog_index} at {escape(manifest.datalog_timestamp)}",
+            ),
+            ("IPFS CID", escape(manifest.cid)),
+        ]
+    rows.append(("Sender", escape(manifest.sender_address)))
     if issue and (issue.ts_start or issue.ts_end):
         rows.insert(2, ("Period", f"{escape(issue.ts_start)} — {escape(issue.ts_end)}"))
     return table(rows)
@@ -288,6 +308,33 @@ def host_health_html(details: dict) -> str:
     return "".join(parts)
 
 
+def _hours(value: object) -> str:
+    return f"{value} h" if isinstance(value, int) else "unknown"
+
+
+def site_signal_html(issue: ReportIssue) -> str:
+    """A site silent, or back: when it last spoke and what it ran."""
+
+    details = issue.details
+    if issue.type == SITE_SILENT:
+        rows = [
+            ("Last signal", escape(details.get("last_signal") or "unknown")),
+            ("Silent for", _hours(details.get("silent_hours"))),
+        ]
+    else:
+        rows = [
+            ("Silent since", escape(details.get("silent_since") or "unknown")),
+            ("Back at", escape(details.get("back_at") or "unknown")),
+            ("Was silent for", _hours(details.get("silent_hours"))),
+        ]
+    rows += [
+        ("Last heartbeat", escape(details.get("last_heartbeat") or "none")),
+        ("Integration", escape(details.get("integration_version") or "unknown")),
+        ("Home Assistant", escape(details.get("ha_version") or "unknown")),
+    ]
+    return table(rows)
+
+
 def details_html(issue: ReportIssue) -> str:
     if issue.type == "accumulated_system_log_problems":
         return log_events_html(issue.details)
@@ -295,6 +342,8 @@ def details_html(issue: ReportIssue) -> str:
         return entities_html(issue.details)
     if issue.type == "host_health":
         return host_health_html(issue.details)
+    if issue.type in (SITE_SILENT, SITE_BACK):
+        return site_signal_html(issue)
     raw = truncate(
         json.dumps(issue.details, ensure_ascii=False, indent=2), MAX_RAW_DETAILS
     )
@@ -398,8 +447,13 @@ def build_repeat_note(
     if files:
         items = "".join(f"<li>{escape(line)}</li>" for line in files)
         files_html = f"<p><b>Attached files</b></p><ul>{items}</ul>"
+    lead = (
+        "<b>The site is back</b>"
+        if issue.type == SITE_BACK
+        else f"<b>Reported again</b> (report {count} for this ticket)"
+    )
     return (
-        f"<p><b>Reported again</b> (report {count} for this ticket): {headline}</p>"
+        f"<p>{lead}: {headline}</p>"
         f"{report_facts(report)}{files_html}"
         f"{details_html(issue) if report.issue else ''}"
     )
