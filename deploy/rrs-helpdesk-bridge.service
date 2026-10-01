@@ -12,11 +12,15 @@ WorkingDirectory=/mnt/disk/pinout-report-service/rrs-helpdesk-bridge
 Environment=PROTON_PASS_SESSION_DIR=/var/lib/rrs-bridge/pass-session
 # The token file stays root-only; systemd hands a copy to this unit alone.
 LoadCredential=token:/etc/rrs/bridge.token
+# The Healthchecks.io ping URL of this service (deploy/healthcheck.sh).
+LoadCredential=healthcheck:/etc/rrs/bridge.healthcheck
 # Dry run until the first tickets have been checked by hand: add --write to
 # this line (and reload) to let it file them.
 ExecStart=/mnt/disk/pinout-report-service/rrs-helpdesk-bridge/deploy/session.sh \
     /mnt/disk/pinout-report-service/rrs-helpdesk-bridge/.venv/bin/rrs-helpdesk-bridge \
     --command run-once
+# After every run, success or not: report the outcome to Healthchecks.io.
+ExecStopPost=/mnt/disk/pinout-report-service/rrs-helpdesk-bridge/deploy/healthcheck.sh
 
 NoNewPrivileges=true
 PrivateTmp=true
