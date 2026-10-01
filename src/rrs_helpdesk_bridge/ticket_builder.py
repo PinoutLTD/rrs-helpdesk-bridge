@@ -17,6 +17,7 @@ from rrs_helpdesk_bridge.manifests import Report, ReportIssue
 ISSUE_LABELS = {
     "accumulated_system_log_problems": "System log",
     "entities_health_problems": "Entities health",
+    "host_health": "Host health",
 }
 
 PRIORITY_MEDIUM = "1"
@@ -64,7 +65,7 @@ def ticket_priority(issue: ReportIssue) -> str:
     levels = {str(level).upper() for level in by_level}
     if "CRITICAL" in levels:
         return PRIORITY_VERY_HIGH
-    if "ERROR" in levels or issue.type == "entities_health_problems":
+    if "ERROR" in levels or issue.type in ("entities_health_problems", "host_health"):
         return PRIORITY_HIGH
     return PRIORITY_MEDIUM
 
@@ -187,11 +188,113 @@ def entities_html(details: dict) -> str:
     return "".join(parts)
 
 
+def _minutes(value: object) -> str:
+    if not isinstance(value, int) or value < 0:
+        return "unknown"
+    return f"{value // 60} h {value % 60} min"
+
+
+def _percent(value: object) -> str:
+    return f"{value}%" if isinstance(value, (int, float)) else "unknown"
+
+
+def host_health_html(details: dict) -> str:
+    """The server itself: memory, its growth, and how the last run ended.
+
+    Every section is optional; the integration sends only what it found.
+    """
+
+    parts = []
+
+    memory = details.get("memory")
+    if isinstance(memory, dict):
+        rows = [
+            ("Used now", _percent(memory.get("used_percent"))),
+            (
+                "Peak",
+                f"{_percent(memory.get('peak_percent'))} at "
+                f"{escape(memory.get('peak_at', ''))}",
+            ),
+            (
+                "Above the limit",
+                f"{_percent(memory.get('limit_percent'))} since "
+                f"{escape(memory.get('above_since', ''))}",
+            ),
+            (
+                "Change over the day",
+                f"{escape(memory.get('change_percent', ''))} points since "
+                f"{escape(memory.get('change_since', ''))}",
+            ),
+            (
+                "Memory",
+                f"{escape(memory.get('available_mib', '?'))} MiB available of "
+                f"{escape(memory.get('total_mib', '?'))} MiB",
+            ),
+            (
+                "Swap in use",
+                f"{escape(memory.get('swap_used_mib', '?'))} MiB of "
+                f"{escape(memory.get('swap_total_mib', '?'))} MiB",
+            ),
+        ]
+        parts.append("<p><b>Memory</b></p>" + table(rows))
+
+    growth = details.get("growth")
+    if isinstance(growth, dict) and isinstance(growth.get("daily_mean_percent"), dict):
+        rows = [
+            (str(day), _percent(mean))
+            for day, mean in growth["daily_mean_percent"].items()
+        ]
+        parts.append("<p><b>Memory growing: daily mean</b></p>" + table(rows))
+
+    containers = details.get("containers")
+    if isinstance(containers, list) and containers:
+        cells = "".join(
+            f"<tr><td>{escape(c.get('name', ''))}</td>"
+            f"<td align='right'>{escape(c.get('memory_mib', ''))} MiB</td>"
+            f"<td align='right'>{_percent(c.get('memory_percent'))}</td></tr>"
+            for c in containers
+            if isinstance(c, dict)
+        )
+        parts.append(
+            "<p><b>Memory by container</b></p>"
+            "<table border='1' cellpadding='4' cellspacing='0'>"
+            "<tr><th align='left'>Container</th><th>Memory</th><th>Share</th></tr>"
+            f"{cells}</table>"
+        )
+
+    shutdown = details.get("shutdown")
+    if isinstance(shutdown, dict):
+        rebooted = shutdown.get("host_rebooted")
+        rows = [
+            ("Last seen alive", escape(shutdown.get("last_seen") or "unknown")),
+            ("Started again", escape(shutdown.get("started", ""))),
+            ("Down for", _minutes(shutdown.get("down_minutes"))),
+            (
+                "Whole host restarted",
+                "unknown (no Supervisor)"
+                if rebooted is None
+                else ("yes" if rebooted else "no, Home Assistant alone"),
+            ),
+        ]
+        if shutdown.get("host_booted"):
+            rows.append(("Host booted", escape(shutdown["host_booted"])))
+        parts.append("<p><b>Shutdown was not clean</b></p>" + table(rows))
+
+    known = {"memory", "growth", "containers", "shutdown"}
+    rest = {key: value for key, value in details.items() if key not in known}
+    if rest:
+        raw = truncate(json.dumps(rest, ensure_ascii=False, indent=2), MAX_RAW_DETAILS)
+        parts.append(f"<p><b>Other details</b></p><pre>{escape(raw)}</pre>")
+    return "".join(parts)
+
+
 def details_html(issue: ReportIssue) -> str:
     if issue.type == "accumulated_system_log_problems":
         return log_events_html(issue.details)
     if issue.type == "entities_health_problems":
         return entities_html(issue.details)
+    if issue.type == "host_health":
+        return host_health_html(issue.details)
     raw = truncate(
         json.dumps(issue.details, ensure_ascii=False, indent=2), MAX_RAW_DETAILS
     )
