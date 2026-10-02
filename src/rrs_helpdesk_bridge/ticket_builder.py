@@ -183,13 +183,54 @@ def log_events_html(details: dict) -> str:
     )
 
 
+def not_loaded_html(details: dict) -> str:
+    """Integrations that did not load: one cause for many unavailable entities."""
+
+    entries = details.get("integrations_not_loaded") or []
+    if not isinstance(entries, list) or not entries:
+        return ""
+    items = []
+    for entry in entries[:MAX_DEVICES]:
+        if not isinstance(entry, dict):
+            continue
+        reason = entry.get("reason")
+        count = entry.get("unavailable_entities") or 0
+        items.append(
+            f"<li><b>{escape(entry.get('domain', ''))}</b> "
+            f"({escape(entry.get('title', ''))}): {escape(entry.get('state', ''))}"
+            f"{', ' + escape(reason) if reason else ''}"
+            f"{f'; {count} of the unavailable entities are its own' if count else ''}"
+            "</li>"
+        )
+    return f"<p><b>Integrations not loaded</b></p><ul>{''.join(items)}</ul>"
+
+
+def without_data_html(details: dict) -> str:
+    """Devices whose every entity is `unknown`: they never delivered data."""
+
+    devices = details.get("devices_without_data") or {}
+    if not isinstance(devices, dict) or not devices:
+        return ""
+    items = []
+    for device in list(devices.values())[:MAX_DEVICES]:
+        if not isinstance(device, dict):
+            continue
+        entities = ", ".join(escape(e) for e in device.get("entities") or [])
+        items.append(f"<li>{escape(device.get('device_name', ''))}: {entities}</li>")
+    return (
+        "<p><b>Devices without data</b> (every entity <code>unknown</code>)</p>"
+        f"<ul>{''.join(items)}</ul>"
+    )
+
+
 def entities_html(details: dict) -> str:
+    context = not_loaded_html(details) + without_data_html(details)
     unavailable = details.get("unavailable_entities") or {}
     if not isinstance(unavailable, dict):
-        return ""
+        return context
     devices = unavailable.get("devices") or {}
     pure = unavailable.get("pure_entities") or []
-    parts = ["<p><b>Unavailable</b></p><ul>"]
+    parts = [context, "<p><b>Unavailable</b></p><ul>"]
     for device in list(devices.values())[:MAX_DEVICES]:
         if not isinstance(device, dict):
             continue

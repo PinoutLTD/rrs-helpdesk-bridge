@@ -275,3 +275,47 @@ def test_host_health_is_high_priority_and_keeps_unknown_sections(reports_dir) ->
     assert ticket_priority(report.issue) == "2"
     assert "Other details" in ticket_description(report)
     assert "backups" in ticket_description(report)
+
+
+def test_integrations_not_loaded_and_devices_without_data_are_shown(
+    reports_dir,
+) -> None:
+    issue = dict(ENTITIES_ISSUE)
+    issue["details"] = dict(
+        ENTITIES_ISSUE["details"],
+        integrations_not_loaded=[
+            {
+                "domain": "xiaomi_miot",
+                "title": "Xiaomi <account>",
+                "state": "setup_retry",
+                "reason": "need_verify",
+                "unavailable_entities": 22,
+            }
+        ],
+        devices_without_data={
+            "d1": {"device_name": "BS_POE_ESP32C3", "entities": ["sensor.bs_temp"]}
+        },
+    )
+
+    description = ticket_description(report_for(reports_dir, issue))
+
+    assert "Integrations not loaded" in description
+    assert (
+        "<b>xiaomi_miot</b>" in description
+        and "setup_retry, need_verify" in description
+    )
+    assert "22 of the unavailable entities are its own" in description
+    assert "&lt;account&gt;" in description
+    assert (
+        "Devices without data" in description
+        and "BS_POE_ESP32C3: sensor.bs_temp" in description
+    )
+    # The unavailable list is still there.
+    assert "Kitchen sensor" in description
+
+
+def test_an_old_entities_report_reads_as_before(reports_dir) -> None:
+    description = ticket_description(report_for(reports_dir, ENTITIES_ISSUE))
+
+    assert "Integrations not loaded" not in description
+    assert "Devices without data" not in description
