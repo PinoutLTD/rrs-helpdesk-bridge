@@ -6,6 +6,7 @@ report has been handled, so a report is not filed twice. There is no cached
 at any time, and only Odoo knows that.
 """
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -26,6 +27,11 @@ CREATE TABLE IF NOT EXISTS processed_reports (
 );
 CREATE INDEX IF NOT EXISTS ix_processed_reports_signature
     ON processed_reports (signature);
+CREATE TABLE IF NOT EXISTS ticket_snapshots (
+    odoo_ticket_id INTEGER PRIMARY KEY,
+    items          TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS unpinned (
     cid         TEXT PRIMARY KEY,
     report_id   TEXT NOT NULL,
@@ -98,6 +104,28 @@ class StateStore:
             connection.commit()
         finally:
             connection.close()
+
+    def snapshot(self, ticket_id: int) -> dict[str, str] | None:
+        """The items of the last report filed into a ticket (changes.py)."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT items FROM ticket_snapshots WHERE odoo_ticket_id = ?",
+                (ticket_id,),
+            ).fetchone()
+        return json.loads(row["items"]) if row else None
+
+    def save_snapshot(self, ticket_id: int, items: dict[str, str]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ticket_snapshots (odoo_ticket_id, items, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(odoo_ticket_id) DO UPDATE SET
+                    items = excluded.items, updated_at = excluded.updated_at
+                """,
+                (ticket_id, json.dumps(items), datetime.now(UTC).isoformat()),
+            )
 
     def is_handled(self, report_id: str) -> bool:
         with self._connect() as connection:

@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from rrs_helpdesk_bridge.attachments import AttachmentPlan, plan_attachments
+from rrs_helpdesk_bridge.changes import compare, snapshot_items
 from rrs_helpdesk_bridge.config import ClientRegistry, EnvSettings
 from rrs_helpdesk_bridge.manifests import (
     ManifestError,
@@ -175,6 +176,7 @@ def append_to_ticket(
     ticket: TicketSummary,
     report: Report,
     settings: EnvSettings,
+    store: StateStore,
 ) -> None:
     count = ticket.count + 1
     plan = AttachmentPlan()
@@ -184,11 +186,18 @@ def append_to_ticket(
     # The note goes first: if anything below fails, the retry starts from the
     # same ticket counter and cannot inflate it. A repeated note is visible,
     # a wrong number is not.
-    odoo.post_note(ticket.id, build_repeat_note(report, count, plan.notes))
+    # Against the ticket's last report: what is new, what is gone. A ticket
+    # without a snapshot (opened before there were any) gets the full list.
+    items = snapshot_items(report.issue)
+    previous = store.snapshot(ticket.id) if items is not None else None
+    changes = compare(previous, items) if previous is not None else None
+    odoo.post_note(ticket.id, build_repeat_note(report, count, plan.notes, changes))
     odoo.update_ticket(
         ticket.id, {"count": count, "last_occurred": last_occurred(report)}
     )
     attach_files(odoo, ticket.id, report, plan)
+    if items is not None:
+        store.save_snapshot(ticket.id, items)
 
 
 def dispatch_report(
@@ -252,6 +261,9 @@ def dispatch_report(
 
     if existing is None:
         ticket_id, detail = open_ticket(odoo, report, registry, settings)
+        items = snapshot_items(report.issue)
+        if items is not None:
+            store.save_snapshot(ticket_id, items)
         if notify_new_ticket(odoo, ticket_id, report, recipients):
             result.notified += 1
         store.record(
@@ -272,7 +284,7 @@ def dispatch_report(
         )
         return
 
-    append_to_ticket(odoo, existing, report, settings)
+    append_to_ticket(odoo, existing, report, settings, store)
     store.record(
         manifest.report_id,
         manifest.client_id,
