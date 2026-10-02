@@ -12,6 +12,7 @@ import html
 import json
 from datetime import UTC, datetime
 
+from rrs_helpdesk_bridge.changes import ENTITIES, Changes
 from rrs_helpdesk_bridge.manifests import Report, ReportIssue
 
 ISSUE_LABELS = {
@@ -432,8 +433,63 @@ def build_new_ticket_notice(report: Report) -> str:
     )
 
 
+def _grouped(items: dict[str, str], limit: int) -> str:
+    """Entities by device (`entity → device`), the way the first report lists them."""
+
+    by_device: dict[str, list[str]] = {}
+    for entity, device in items.items():
+        by_device.setdefault(device, []).append(entity)
+    lines = []
+    for device, entities in list(by_device.items())[:limit]:
+        names = ", ".join(escape(entity) for entity in sorted(entities))
+        lines.append(f"<li>{escape(device) + ': ' if device else ''}{names}</li>")
+    hidden = max(len(by_device) - limit, 0)
+    more = f"<li>… and {hidden} more</li>" if hidden else ""
+    return f"<ul>{''.join(lines)}{more}</ul>"
+
+
+def _messages(items: dict[str, str], limit: int) -> str:
+    lines = [
+        f"<li>{escape(truncate(label, MAX_MESSAGE_LENGTH))}</li>"
+        for label in list(items.values())[:limit]
+    ]
+    hidden = max(len(items) - limit, 0)
+    more = f"<li>… and {hidden} more</li>" if hidden else ""
+    return f"<ul>{''.join(lines)}{more}</ul>"
+
+
+def changes_html(issue: ReportIssue, changes: Changes) -> str:
+    """What moved since the ticket's last report, instead of the whole list."""
+
+    entities = issue.type == ENTITIES
+    noun = "unavailable" if entities else "messages"
+    if changes.none:
+        return (
+            "<p><b>No change since the last report</b>: "
+            f"{changes.unchanged} {noun}, the same as before.</p>"
+        )
+    render = (
+        (lambda items: _grouped(items, MAX_DEVICES))
+        if entities
+        else (lambda items: _messages(items, MAX_TOP_EVENTS))
+    )
+    parts = ["<p><b>Since the last report</b></p>"]
+    if changes.new:
+        title = "Newly unavailable" if entities else "New messages"
+        parts.append(f"<p>{title} ({len(changes.new)}):</p>{render(changes.new)}")
+    if changes.gone:
+        title = "Back to normal" if entities else "No longer seen"
+        parts.append(f"<p>{title} ({len(changes.gone)}):</p>{render(changes.gone)}")
+    still = "Still unavailable" if entities else "Seen again"
+    parts.append(f"<p>{still}: {changes.unchanged}, as before.</p>")
+    return "".join(parts)
+
+
 def build_repeat_note(
-    report: Report, count: int, files: list[str] | None = None
+    report: Report,
+    count: int,
+    files: list[str] | None = None,
+    changes: Changes | None = None,
 ) -> str:
     """An internal note added when the same problem is reported again.
 
@@ -447,6 +503,10 @@ def build_repeat_note(
     if files:
         items = "".join(f"<li>{escape(line)}</li>" for line in files)
         files_html = f"<p><b>Attached files</b></p><ul>{items}</ul>"
+    if changes is not None:
+        body = changes_html(issue, changes)
+    else:
+        body = details_html(issue) if report.issue else ""
     lead = (
         "<b>The site is back</b>"
         if issue.type == SITE_BACK
@@ -455,5 +515,5 @@ def build_repeat_note(
     return (
         f"<p>{lead}: {headline}</p>"
         f"{report_facts(report)}{files_html}"
-        f"{details_html(issue) if report.issue else ''}"
+        f"{body}"
     )
